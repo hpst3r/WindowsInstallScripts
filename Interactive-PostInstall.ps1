@@ -1,0 +1,1 @@
+# interactively configure domain join, software installation, etc after the OS is installed.
