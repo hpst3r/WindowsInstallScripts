@@ -98,3 +98,97 @@ Mode                 LastWriteTime         Length Name
 d----            6/4/2025  7:57 PM                21G2002CUS
 d----            6/4/2025 10:15 PM                Dell Pro 16 PC16250
 ```
+
+#### Import drivers on a running system (post-installation)
+
+To import drivers from an external disk, you can use the aptly-named `Import-Drivers.ps1` script.
+
+To use it, set your execution policy to `Unrestricted` for the current process, then call the script
+(from an elevated PowerShell terminal):
+
+```PowerShell
+PS C:\WINDOWS\system32> Set-ExecutionPolicy Unrestricted -Scope Process
+PS C:\WINDOWS\system32> D:\scripts\Import-Drivers.ps1
+```
+
+This requires a .drivers directory on a system disk, with a directory named with the system model
+as returned by `(Get-CimInstance Win32_ComputerSystem).Model`.
+
+If the directory is not found, the script will fail with two errors about a directory for the model not being found.
+
+```PowerShellNoHighlighting
+PS C:\WINDOWS\system32> D:\scripts\Import-Drivers.ps1
+Transcript started, output file is C:\Users\nladmin\AppData\Local\Temp\driver-import-Dell Inc.-Dell Pro 16 PC16250-redacted-1749221259.71894.log
+Found .drivers directory at: D:\.drivers
+Get-DriverFiles : No directory for device model 'Dell Pro 16 PC16250' found at D:\.drivers. Execution cannot continue.
+At D:\scripts\Import-Drivers.ps1:216 char:34
++ $DriverFiles, $DriverDirectory = Get-DriverFiles -Model $Model
++                                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [Write-Error], WriteErrorException
+    + FullyQualifiedErrorId : Microsoft.PowerShell.Commands.WriteErrorException,Get-DriverFiles
+
+D:\scripts\Import-Drivers.ps1 : Drivers for system model 'Dell Pro 16 PC16250' were not found and thus cannot be installed. No changes were made.
+At line:1 char:1
++ D:\scripts\Import-Drivers.ps1
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [Write-Error], WriteErrorException
+    + FullyQualifiedErrorId : Microsoft.PowerShell.Commands.WriteErrorException,Import-Drivers.ps1
+
+Transcript stopped, output file is C:\Users\nladmin\AppData\Local\Temp\driver-import-Dell Inc.-Dell Pro 16 PC16250-redacted-1749221259.71894.log
+Script execution completed.
+```
+
+If the directory is found, but does not have .inf files in it, the script will fail
+with an error mentioning that no drivers are available in the model's corresponding driver directory:
+
+```PowerShellNoHighlighting
+PS C:\WINDOWS\system32> D:\scripts\Import-Drivers.ps1
+Transcript started, output file is C:\Users\nladmin\AppData\Local\Temp\driver-import-Dell Inc.-Dell Pro 16 PC16250-9YXK494-1749224394.2804.log
+Found .drivers directory at: D:\.drivers
+Found driver directory for model 'Dell Pro 16 PC16250': D:\.drivers\Dell Pro 16 PC16250
+Get-DriverFiles : No driver files (.inf) found in D:\.drivers\Dell Pro 16 PC16250. Execution cannot continue.
+At D:\scripts\Import-Drivers.ps1:200 char:34
++ $DriverFiles, $DriverDirectory = Get-DriverFiles -Model $Model
++                                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [Write-Error], WriteErrorException
+    + FullyQualifiedErrorId : Microsoft.PowerShell.Commands.WriteErrorException,Get-DriverFiles
+
+D:\scripts\Import-Drivers.ps1 : Drivers for system model 'Dell Pro 16 PC16250' were not found and thus cannot be installed. No changes were made.
+At line:1 char:1
++ D:\scripts\Import-Drivers.ps1
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [Write-Error], WriteErrorException
+    + FullyQualifiedErrorId : Microsoft.PowerShell.Commands.WriteErrorException,Import-Drivers.ps1
+
+Transcript stopped, output file is C:\Users\nladmin\AppData\Local\Temp\driver-import-Dell Inc.-Dell Pro 16 PC16250-9YXK494-1749224394.2804.log
+Execution completed at 1749224394.47072.
+```
+
+If the directory is found, and has .inf files in it, the script will install all available `.inf` files with pnputil:
+
+```PowerShellNoHighlighting
+PS C:\WINDOWS\system32> D:\scripts\Import-Drivers.ps1
+Transcript started, output file is C:\Users\nladmin\AppData\Local\Temp\driver-import-Dell Inc.-Dell Pro 16 PC16250-SERIAL-1749224113.66399.log
+Found .drivers directory at: D:\.drivers
+Found driver directory for model 'Dell Pro 16 PC16250': D:\.drivers\Dell Pro 16 PC16250
+Starting driver installation from directory: D:\.drivers\Dell Pro 16 PC16250 at 1749224113.75985
+(1/271) Installing driver: D:\.drivers\Dell Pro 16 PC16250\alderlakedmasecextension.inf_amd64_f0d7eea44ed4e421\AlderLakeDmaSecExtension.inf
+Successfully installed driver: AlderLakeDmaSecExtension.inf
+(2/271) Installing driver: D:\.drivers\Dell Pro 16 PC16250\alderlakepch-ndmasecextension.inf_amd64_c1a7e34728e428a8\AlderLakePCH-NDmaSecExtension.inf
+Successfully installed driver: AlderLakePCH-NDmaSecExtension.inf
+(3/271) Installing driver: D:\.drivers\Dell Pro 16 PC16250\alderlakepch-nsystem.inf_amd64_23100d9890c77cd8\AlderLakePCH-NSystem.inf
+Successfully installed driver: AlderLakePCH-NSystem.inf
+### snip ###
+(270/271) Installing driver: D:\.drivers\Dell Pro 16 PC16250\wavesapo14de.inf_amd64_1525f9780cefa3f6\WavesAPO14De.inf
+Successfully installed driver: WavesAPO14De.inf
+(271/271) Installing driver: D:\.drivers\Dell Pro 16 PC16250\wavesapo14de_sc.inf_amd64_f361b9bb92dd7a31\WavesAPO14De_SC.inf
+Successfully installed driver: WavesAPO14De_SC.inf
+Driver import from D:\.drivers\Dell Pro 16 PC16250 completed at 1749224124.63893
+Duration: 10.8859983 seconds
+Processed 271 driver(s)
+Successfully installed: 271
+Failed to install: 0
+Transcript stopped, output file is C:\Users\nladmin\AppData\Local\Temp\driver-import-Dell Inc.-Dell Pro 16 PC16250-SERIAL-1749224113.66399.log
+Moving transcript to driver directory at: D:\.drivers\Dell Pro 16 PC16250.
+Execution completed at 1749224124.77176.
+```

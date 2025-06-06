@@ -4,6 +4,10 @@ function Export-Drivers {
 
   $Model = (Get-CimInstance -Class Win32_ComputerSystem).Model
 
+  $TranscriptPath = "$($env:TEMP)\driver-export-$($Model)-$(Get-Date -UFormat %s)"
+
+  Start-Transcript -Path $TranscriptPath
+
   function Select-ExportTargetDisk {
     param (
       [Parameter(Mandatory = $true)]
@@ -125,14 +129,13 @@ Please enter the drive letter for the target disk for driver export:
 
   Write-Host "Exporting drivers from Windows image to $($DriverPath). This may take a while."
 
-  $Drivers = (Export-WindowsDriver -Online -Destination $DriverPath -ErrorAction Stop)
+  Export-WindowsDriver -Online -Destination $DriverPath -ErrorAction Stop
 
-  $env:ExportResult = $Drivers
+  Write-Host "Driver export completed successfully. Drivers saved to '$($DriverPath)'."
 
-  Write-Host @"
-Driver export completed successfully. Drivers saved to '$($DriverPath)'.
-Check environment variable `$env:ExportResult` for the output object from Export-WindowsDriver.
-"@
+  Stop-Transcript
+
+  Move-Item -Path $TranscriptPath -Destination $DriverPath.FullName
 
 }
 
