@@ -1,12 +1,8 @@
+#Requires -RunAsAdministrator
+
 # Interactively export driver .inf files from a system in Audit Mode to a disk
 
 function Export-Drivers {
-
-  $Model = (Get-CimInstance -Class Win32_ComputerSystem).Model
-
-  $TranscriptPath = "$($env:TEMP)\driver-export-$($Model)-$(Get-Date -UFormat %s)"
-
-  Start-Transcript -Path $TranscriptPath
 
   function Select-ExportTargetDisk {
     param (
@@ -17,7 +13,7 @@ function Export-Drivers {
     $Volumes = (Get-Volume | Select-Object -Property DriveLetter, FileSystemLabel, FileSystemType, Size, SizeRemaining, DriveType)
 
     Write-Host @"
-Available Volumes:
+Available volumes:
 $($Volumes | Format-Table -AutoSize | Out-String)
 Please enter the drive letter for the target disk for driver export:
 "@
@@ -29,113 +25,144 @@ Please enter the drive letter for the target disk for driver export:
         $ExternalDrive += ":"
     }
 
-    return "$($ExternalDrive)\.drivers\$($Model)"
+    return $ExternalDrive
 
   }
 
-  # half-assed validate the export path exists and create it if it does not
-  # TODO: dress this up a bit
+  # validate the export path exists and create it if it does not
   function Initialize-ExportPath {
     param (
       [Parameter(Mandatory = $true)]
-      [string]$Path
+      [string]$ExternalDrive,
+      [string]$Directory,
+      [string]$Model
     )
 
-          # if directory already exists, prompt for confirmation to overwrite
-    if (Test-Path -Path $DriverPath) {
+    $AssembledPath = "$($ExternalDrive)\$($Directory)\$($Model)"
 
-        $Confirm = Read-Host "Directory '$($DriverPath)' already exists. Do you want to overwrite it? (Y/N)"
+    Write-Host "Validating export path: '$($ExternalDrive)\$($Directory)\$($Model)'..."
 
-        if ($Confirm.Trim().ToUpper() -ne 'Y') {
-
-            Write-Host "Export cancelled by user."
-            
-            return $false
-
-        } # fi
-        else {
-
-          Write-Host "Removing existing directory '$($DriverPath)'."
-
-          try {
-
-            Remove-Item $DriverPath -Recurse -Force -ErrorAction Stop | Out-Null
-
-          } # try
-          catch {
-            
-            Write-Error "An error occurred while removing the existing directory: $($_.Exception.Message)"
-
-            return $false
-
-          }
-
-        }
+    # Try to resolve the exact path first
+    if (Test-Path $AssembledPath) {
+      $ResolvedPath = (Resolve-Path $AssembledPath).Path
+    } else {
+      # Try to find a near match containing the model name
+      $PathMatches = Get-ChildItem -Path "$($ExternalDrive)\$($Directory)" -Directory -Filter "*$($Model)*" -ErrorAction SilentlyContinue
+      # use the first match if found
+      if ($PathMatches) {
+        $ResolvedPath = $PathMatches[0].FullName
+        Write-Host "Exact match for this model was not found, but similar directory '$($ResolvedPath)' was."
+      } else { # otherwise use the exact model name
+        $ResolvedPath = $AssembledPath
+        Write-Host "No existing directory found. Creating one at: '$($ResolvedPath)'."
+      }
 
     }
 
-    $ParentPath = (Split-Path -Path $Path -Parent)
+    # if directory already exists, prompt for confirmation to overwrite
+    if (Test-Path $ResolvedPath 2> $null) {
 
-    try {
+      $Confirm = Read-Host "Directory '$($ResolvedPath)' already exists. Do you want to overwrite it? (Y/N)"
 
-      # attempt to create the parent directory if it does not exist
+      if ($Confirm.Trim().ToUpper() -eq 'Y') {
 
-      if (-not $ParentPath) {
+        Write-Host "Removing existing directory '$($ResolvedPath)'..."
 
-        Write-Host "The specified parent path does not exist. Creating it now."
+        try {
 
-        New-Item -ItemType Directory -Path $ParentPath -Force -ErrorAction Stop | Out-Null
+          Remove-Item $ResolvedPath -Recurse -Force -ErrorAction Stop | Out-Null
 
-        Write-Host "Parent path '$($ParentPath)' created successfully."
+        } # try
+        catch {
+          
+          throw "An error occurred while removing the existing directory: $($_.Exception.Message)"
+
+        }
+
+      } # fi
+      else { # if not Y
+
+        throw "Terminating: Export cancelled by user."
 
       }
 
-      # attempt to create the model directory if it does not exist
+    }
 
-      if (-not (Test-Path -Path $Path)) {
+    try {
 
-        Write-Host "Creating model directory '$($Path)'..."
+      # attempt to create the directory if it does not exist or if we've removed it
 
-        New-Item -ItemType Directory -Path $Path -Force -ErrorAction Stop | Out-Null
+      if (-not (Test-Path -Path $ResolvedPath)) {
 
-        Write-Host "Path '$($Path)' created successfully."
+        Write-Host "Creating model directory '$($ResolvedPath)'..."
+
+        New-Item -ItemType Directory -Path $ResolvedPath -Force -ErrorAction Stop | Out-Null
+
+        Write-Host "Path '$($ResolvedPath)' created successfully."
 
       }
 
     } # try
     catch {
 
-      Write-Error "An error occurred while creating the path: $($_.Exception.Message)"
-
-      return $false
+      throw "An error occurred while creating the path: $($_.Exception.Message)"
 
     }
 
-    return $true
+    return $ResolvedPath
 
   }
 
-  Write-Host "System model detected: '$($Model)'."
+  $Model = (Get-CimInstance -Class Win32_ComputerSystem).Model
 
-  $DriverPath = (Select-ExportTargetDisk -Model $Model)
+  $TranscriptPath = "$($env:TEMP)\driver-export-$($Model)-$(Get-Date -UFormat %s)"
+  Start-Transcript -Path $TranscriptPath
 
-  if (-not (Validate-ExportPath -Path $DriverPath)) {
+  try {
 
-    Write-Error "Export path validation failed. Terminating script."
+    Write-Host "System model detected: '$($Model)'."
 
-    return
+    $ExternalDrive = (Select-ExportTargetDisk -Model $Model)
 
+    $DriverPath = (Initialize-ExportPath -ExternalDrive $ExternalDrive -Directory ".drivers" -Model $Model)
+
+    if (-not (Test-Path $DriverPath 2> $null)) {
+
+      Write-Error "Export path validation failed. Terminating script."
+      return
+
+    }
+
+    Write-Host "Exporting drivers from Windows image to $($DriverPath). This may take a while."
+
+    # export drivers from the online Windows image to the specified path
+    Export-WindowsDriver -Online -Destination $DriverPath -ErrorAction Stop
+
+    Write-Host "Driver export completed. Drivers have been exported from the online image to '$($DriverPath)'."
+  
   }
+  finally {
 
-  Write-Host "Exporting drivers from Windows image to $($DriverPath). This may take a while."
+    Write-Host "Export process completed. Cleaning up..."
 
-  Export-WindowsDriver -Online -Destination $DriverPath -ErrorAction Stop
+    # stop the transcript and move it to the removable disk
+    Stop-Transcript
 
-  Write-Host "Driver export completed successfully. Drivers saved to '$($DriverPath)'."
+    if (-not (Test-Path -Path $DriverPath 2> $null)) {
 
-  Stop-Transcript
+      Write-Warning "The machine export path does not exist. Transcript will not be moved from $($env:TEMP)."
 
-  Move-Item -Path $TranscriptPath -Destination $DriverPath.FullName
+    } else {
+
+      Write-Host "Moving transcript to the export directory..."
+      Move-Item -Path $TranscriptPath -Destination $DriverPath
+      Write-Host "Transcript moved to '$($DriverPath)\$(($TranscriptPath -split '\\')[-1])'."
+
+      Write-Host "Cleanup complete."
+
+    }
+    
+  }
 
 }
 
